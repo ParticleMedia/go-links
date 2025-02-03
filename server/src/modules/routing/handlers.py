@@ -1,4 +1,4 @@
-import time
+import os
 from urllib import parse
 
 from flask import Blueprint, request, redirect
@@ -44,36 +44,31 @@ def queue_event(org_id, followed_at, shortlink_id, destination, accessed_via, em
 
 @routes.route('/<path:path>', methods=['GET'])
 def get_go_link(path):
-  requested_at = time.time()
-
-  if not getattr(current_user, 'email', None):
-    return redirect('/_/auth/login?%s' % parse.urlencode({'redirect_to': request.full_path}))
+  organization = getattr(current_user, 'organization', os.environ.get('DEFAULT_ORGANIZATION'))
 
   provided_shortpath = parse.unquote(path.strip('/'))
   shortpath_parts = provided_shortpath.split('/', 1)
 
-  org_config = config.get_organization_config(current_user.organization)
+  org_config = config.get_organization_config(organization)
   # note: we can't remove all punctuation here because punctuation may be part of a programmatic link parameter
   alternative_resolution_mode = is_using_alternative_keyword_resolution(org_config)
   keywords_punctuation_sensitive = are_keywords_punctuation_sensitive(org_config)
   shortpath = '/'.join([get_canonical_keyword(keywords_punctuation_sensitive, shortpath_parts[0].lower())] + shortpath_parts[1:])
 
-  namespace, shortpath, provided_shortpath = check_namespace(current_user.organization, shortpath, provided_shortpath)
+  namespace, shortpath, provided_shortpath = check_namespace(organization, shortpath, provided_shortpath)
 
-  matching_shortlink, destination = get_shortlink(current_user.organization,
+  matching_shortlink, destination = get_shortlink(organization,
                                                   keywords_punctuation_sensitive,
                                                   alternative_resolution_mode,
                                                   namespace,
                                                   shortpath)
 
   if matching_shortlink:
-    queue_event(matching_shortlink.organization,
-                requested_at,
-                matching_shortlink.get_id(),
-                destination,
-                request.args.get('s') or 'other')
     return redirect(str(destination))
   else:
+    if not getattr(current_user, 'email', None):
+      return redirect('/_/auth/login?%s' % parse.urlencode({'redirect_to': request.full_path}))
+
     for router in ROUTERS:
       response = router(current_user.organization, namespace, shortpath)
 
